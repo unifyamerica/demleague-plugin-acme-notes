@@ -17,6 +17,14 @@ Endpoints are mounted at `/plugins/acme/notes`. Notes are kept per organization 
 The UI adds a **Notes** page to the sidebar and a **Notes overview** page (org admins only) to the account menu.
 Both live under `/apps/acme/notes` and work in the organization picked in the SPA's header.
 
+## Building with an AI agent
+
+[`PLUGIN_AI_CONTEXT.md`](PLUGIN_AI_CONTEXT.md) is the plugin contract written for AI coding agents (Claude
+Code, the Claude app, …). Give it to your agent as its instructions (for example as `CLAUDE.md`), then
+describe your module with the feature specification template at its end. It comes along when you start a
+new plugin from this repository. The full reference for people is the
+[Plugin Developer Guide](https://github.com/unifyamerica/demleague-plugin-sdk/blob/main/PLUGIN_DEVELOPER_GUIDE.md).
+
 ## Starting a new plugin from this one
 
 Each plugin lives in its own repo in the `unifyamerica` GitHub org, named like its package:
