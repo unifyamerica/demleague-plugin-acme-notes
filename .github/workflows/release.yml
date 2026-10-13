@@ -1,0 +1,17 @@
+# Every module repository (unifyamerica/demleague-plugin-<vendor>-<module>): releases on a v<version>
+# tag through the org's release workflow, the only way a DemLeagueOS plugin gets published. Keep it as is.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    uses: unifyamerica/demleague-plugin-workflows/.github/workflows/plugin-release.yml@main

@@ -1,0 +1,106 @@
+{
+  "name": "@unifyamerica/demleague-plugin-acme-notes",
+  "version": "0.1.0",
+  "description": "Example DemLeagueOS plugin (namespace acme.notes): per-user notes in each organization, with an API part and a Vue UI. Doubles as the template for third-party plugins.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unifyamerica/demleague-plugin-acme-notes.git"
+  },
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/**/*.spec.*"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    "build": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json && vite build && vue-tsc -p tsconfig.ui.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "test": "NODE_OPTIONS='--experimental-vm-modules --disable-warning=ExperimentalWarning' jest && vitest run",
+    "type-check": "tsc --noEmit && vue-tsc -p tsconfig.ui.json --noEmit",
+    "lint": "eslint \"src/**/*.{ts,vue}\"",
+    "lint:check": "eslint \"src/**/*.{ts,vue}\""
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^12.0.0",
+    "@unifyamerica/demleague-plugin-sdk": "^0.1.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.0",
+    "primevue": "^4.5.0",
+    "reflect-metadata": "^0.2.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@nestjs/common": "^12.1.2",
+    "@nestjs/core": "^12.1.2",
+    "@nestjs/testing": "^12.1.2",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.19.0",
+    "@unifyamerica/demleague-plugin-sdk": "^0.1.1",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "@vue/test-utils": "^2.5.1",
+    "@vue/tsconfig": "^0.9.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "eslint-plugin-vue": "^10.11.1",
+    "globals": "^17.13.0",
+    "jest": "^30.5.2",
+    "jsdom": "^30.1.2",
+    "pinia": "^4.0.3",
+    "prettier": "^3.9.9",
+    "primevue": "^4.5.5",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "ts-jest": "^29.4.14",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3",
+    "vue": "^3.5.43",
+    "vue-tsc": "^3.3.12"
+  },
+  "jest": {
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    },
+    "testEnvironment": "node",
+    "setupFiles": [
+      "reflect-metadata"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/ui/"
+    ]
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./ui": {
+      "types": "./dist/ui-types/ui/index.d.ts",
+      "default": "./dist/ui/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "peerDependenciesMeta": {
+    "primevue": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
