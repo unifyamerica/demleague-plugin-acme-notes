@@ -19,7 +19,7 @@ the SPA when it bundles the UI. Code that violates it won't load, or will fail i
 requirement can't be met within the contract, say so plainly and propose the closest conforming design. Never
 work around the contract.
 
-**Contract version:** `@unifyamerica/demleague-plugin-sdk` 0.1.x, `SDK_API_VERSION = 1`, NestJS `^12`, `class-validator`
+**Contract version:** `@unifyamerica/demleague-plugin-sdk` 0.2.x, `SDK_API_VERSION = 1`, NestJS `^12`, `class-validator`
 `^0.15`, `class-transformer` `^0.5.1`, Node 24, TypeScript ~6.0, Jest + ts-jest (API). UI: Vue `^3.5`,
 Pinia `^4` (provided through the SDK), PrimeVue `^4.5`, Tailwind utility classes, Vite `^8` (library mode),
 vue-tsc `^3.3`, Vitest `^5` + `@vue/test-utils` + jsdom.
@@ -38,8 +38,8 @@ Check every one of these before you present code.
 3. Declare the plugin with **`@PluginModule({ manifest, controllers, providers })`**, never `@Module()`. It has
    **no `imports`**. Never use `@Global()` or providers whose token is `APP_GUARD`, `APP_INTERCEPTOR`,
    `APP_FILTER` or `APP_PIPE`.
-4. **Dependency injection:** inject only `UsersProxy`, `OrganizationsProxy`, `DataProxy`, `EventBusProxy`,
-   `PluginContext`, `PluginLogger`, Nest's `Reflector`, and the plugin's own classes listed in `providers`.
+4. **Dependency injection:** inject only `UsersProxy`, `DataProxy`, `EventBusProxy`, `PluginContext`,
+   `PluginLogger`, Nest's `Reflector`, and the plugin's own classes listed in `providers`.
    Never inject `ModuleRef`, core services, config services or DB connections.
 5. **Every controller route must be declared** in `manifest.endpoints`, with the same method and the path
    `'/' + controllerPath + '/' + handlerPath` (normalized). Every declared endpoint must exist. There can't
@@ -64,8 +64,8 @@ Check every one of these before you present code.
     the API, and `installTestPluginHost` from `@unifyamerica/demleague-plugin-sdk/vue/testing` (Vitest) for the UI.
 13. **The manifest file imports from `@unifyamerica/demleague-plugin-sdk/manifest`** (NestJS-free), so the UI can import
     it too.
-14. **Abilities.** Every `@RequireAbility()` subject is a platform subject (`User`, `Organization`) or one
-    declared in `manifest.abilities`. Every page `ability.subject` is declared in `manifest.abilities`. Every
+14. **Abilities.** Every `@RequireAbility()` subject is the platform subject `User` or one declared in
+    `manifest.abilities` (an org-admin-only feature declares its own subject granted to `org_admin`). Every page `ability.subject` is declared in `manifest.abilities`. Every
     grant must be approved in the registry's `approvedAbilityGrants`. Ask for the **minimum grants**. Grants
     are per organization role only (`member`, `org_admin`): there are no system roles or platform admins, so
     a subject with `{}` is usable by nobody.
@@ -120,7 +120,6 @@ export const PluginPermissions = {
   USERS_READ: 'users:read',                 // read users: names, membership in the current org (no email)
   USERS_READ_EMAIL: 'users:read:email',     // also email (PII); REQUIRES users:read
   USERS_WRITE: 'users:write',               // updateProfile: firstName, lastName, timezone only
-  ORGANIZATIONS_READ: 'organizations:read',
   DATA_READ: 'data:read',                   // find/findById/count on own collections
   DATA_WRITE: 'data:write',                 // insert/update/remove on own collections
 } as const;
@@ -279,14 +278,14 @@ export const CurrentActor: () => ParameterDecorator;   // usage: @CurrentActor()
 
 // Route/class decorator: ability check by the host (401 on public endpoints, 403 if lacking), see §3
 export type CoreAbilityAction = 'manage' | 'create' | 'read' | 'update' | 'delete';
-export type CoreAbilitySubject = 'User' | 'Organization';
-export const CORE_ABILITY_SUBJECTS: CoreAbilitySubject[];  // ['User', 'Organization']
+export type CoreAbilitySubject = 'User';
+export const CORE_ABILITY_SUBJECTS: CoreAbilitySubject[];  // ['User']
 export interface RequiredAbility {
   action: CoreAbilityAction;
   subject: string;         // a platform subject, or one of the plugin's own (declared in manifest.abilities)
 }
 export const RequireAbility: (action: CoreAbilityAction, subject: CoreAbilitySubject | (string & {})) => CustomDecorator;
-// usage: @RequireAbility('read', 'Note')  |  @RequireAbility('update', 'Organization')
+// usage: @RequireAbility('read', 'Note')  |  @RequireAbility('read', 'User')
 ```
 
 ### 2.5 DTOs (always plain copies)
@@ -330,10 +329,6 @@ export abstract class UsersProxy {          // users:read / users:write; ≤100 
   findMembers(query?: { limit?: number; skip?: number }): Promise<PluginPage<PluginUser>>; // current org's active members, by id; limit ≤ 100 (default 25)
   updateProfile(id: string, changes: PluginUserProfileUpdate): Promise<PluginUser>; // PluginActorForbiddenError if actor can't
 }
-export abstract class OrganizationsProxy {  // organizations:read; ≤100 ids per call
-  findById(id: string): Promise<PluginOrganization | null>;
-  findByIds(ids: string[]): Promise<PluginOrganization[]>;
-}
 export interface PluginCollection<T extends object> {
   insert(document: T): Promise<PluginRecord<T>>;  // always in the current organization (tenant()); can't be chosen
   findById(id: string): Promise<PluginRecord<T> | null>;    // null if missing/removed/malformed id
@@ -369,7 +364,7 @@ export abstract class PluginLogger {
 ```
 
 Every proxy call needs its permission (`PluginPermissionDeniedError` otherwise) and counts as a DB operation
-towards `dbOperationsPerMinute`. On a user's request, user and organization reads and writes are **also**
+towards `dbOperationsPerMinute`. On a user's request, user reads and writes are **also**
 limited to what that user may do. In event handlers and public endpoints, only the plugin's permissions
 apply.
 
@@ -386,7 +381,7 @@ the host and in the test harness alike. A plugin can never read or change anothe
 - **Users:** only the current organization's active members are found or updated, with `memberships` listing
   only that organization. Without one: only the acting user, or in a handler the user a core event is about
   (`payload.userId`).
-- **Organizations:** only the current one is found; without one, none.
+- **Organizations:** there's no organizations proxy. `tenant()` is the only organization a plugin sees.
 - **Events:** emitted in the current organization (`event.organizationId`); a payload `organizationId`
   field must equal it.
 - `organizationId` is reserved like `createdBy`: a document field with that name is stripped on insert and
@@ -421,7 +416,7 @@ export type PluginEventHandler<TName extends string = string> = (event: PluginEv
 - An emitted payload is a plain JSON object of at most 32 KB. Subscribers receive it frozen.
 - Subscribe with `events.on(...)` inside `onModuleInit()` of a provider listed in `providers`.
 - Handlers run asynchronously **without an actor, in the event's organization** (`tenant()` = the event's
-  org, `null` for an event without one): data, users and organizations are confined to it (§2.6). Failures
+  org, `null` for an event without one): data and users are confined to it (§2.6). Failures
   and timeouts are logged and never affect the emitter.
 - Events are **in-memory and not durable**. Never rely on them for must-not-lose work.
 - Use `Date` values in documents, but ISO strings in event payloads, because payloads must be JSON.
@@ -442,7 +437,7 @@ export type ModuleLifecycleHandler = (event: ModuleLifecycleEvent) => void | Pro
 ```
 
 - An org admin turns the module on/off per organization (Modules page). The host runs the hook **in that
-  organization** (tenant() = it; data, users and organizations confined to it), without an actor, within
+  organization** (tenant() = it; data and users confined to it), without an actor, within
   `lifecycleHookTimeoutMs`.
 - With `onEnabled` declared, the module is **only on once it succeeded** (requests 403 `MODULE_DISABLED`,
   events not delivered until then). Turning off is immediate; `onDisabled` runs after.
@@ -514,14 +509,13 @@ export interface PluginTestingOptions {
   actor?: PluginActor | null;            // default null; like the host, actor() only returns their membership in `tenant`
   tenant?: PluginOrganization | null;    // the request's X-Tenant organization; default null
   users?: PluginUser[];
-  organizations?: PluginOrganization[];
+  organizations?: PluginOrganization[];  // what events.deliver() and lifecycle run in, by id
   permissions?: PluginPermission[];      // override manifest permissions to test denials
 }
 export interface PluginTestHarness {
   module: TestingModule;                 // module.get(MyService)
   context: TestPluginContext;            // setActor(actor|null), setTenant(org|null), permissions
   users: InMemoryUsersProxy;             // .users: Map<string, PluginUser>
-  organizations: InMemoryOrganizationsProxy; // .organizations: Map
   data: InMemoryDataProxy;               // .store: Map<collection, Map<id, record>> (includes soft-deleted, isEnabled:false); .usage {documents, bytes}
   events: RecordingEventBusProxy;        // .emitted: PluginEvent[]; deliver(name, payload, source='core', organizationId=null): Promise<void> (actor null and tenant = the event's org from `organizations`, restored after; event.organizationId = core payload's organizationId, else the argument; no module on/off check; rejects on first handler error); subscribedEvents(): string[]
   lifecycle: InMemoryModuleLifecycleProxy; // enable / disable / upgrade(orgId, event?): run the hooks like the host (actor null, tenant = that org from `organizations`; rejects on first error); removeData(orgId, event?): onDataRemoved, then deletes the org's records from `data`; registeredHooks()
@@ -531,7 +525,7 @@ export interface PluginTestHarness {
 export function createPluginTestHarness(plugin: Type<unknown>, options?: PluginTestingOptions): Promise<PluginTestHarness>;
 export function createPluginTestingModule(plugin: Type<unknown>, options?: PluginTestingOptions): TestingModuleBuilder; // for overrideProvider()
 export function matchesFilter(record: Record<string, unknown>, filter?: PluginFilter): boolean;
-// also exported: TestPluginContext, InMemoryUsersProxy, InMemoryOrganizationsProxy, InMemoryDataProxy,
+// also exported: TestPluginContext, InMemoryUsersProxy, InMemoryDataProxy,
 // InMemoryStorageUsage, RecordingEventBusProxy, RecordingPluginLogger
 ```
 
@@ -704,9 +698,9 @@ export function uninstallTestPluginHost(): void;   // in afterEach
   `member`'s in B, each only in that org. On the API, a request's ability only holds the membership in
   its `X-Tenant`. Nobody holds `manage all`, so `{}` subjects pass for nobody.
 - `@RequireAbility(action, Subject)` on a **plugin subject** is checked in the request's tenant: org grants
-  pass only for the `X-Tenant` organization. On a **platform subject** (`User`, `Organization`) it is
-  type-level, against the ability in the request's tenant (the only organization it holds); for details,
-  use `actor.memberships` (the membership in `tenant()`).
+  pass only for the `X-Tenant` organization. On the **platform subject** `User` it is type-level, against
+  the ability in the request's tenant; for the user's roles there, use `actor.memberships` (the membership
+  in `tenant()`).
 - The SPA receives the same rules (for all the user's active memberships, each conditioned on its org), so `useAbility().can()`, page abilities and menu visibility match the API.
 
 **The loader refuses to start the API** (in addition to manifest and route mismatches) when a manifest grant
@@ -803,7 +797,7 @@ pins, requires the installed tarball (lockfile integrity) to carry an attestatio
 workflow on `main` for the `v<version>` tag of `unifyamerica/<package short name>`
 (`gh attestation verify`), applies the same pin and provenance checks to the SDK (one exact version in both
 `package.json` files, attested by `unifyamerica/demleague-plugin-sdk`'s release workflow), and runs the boot gate (`loadPlugins()` against the registry). Peer dependencies are
-`@unifyamerica/demleague-plugin-sdk ^0.1.0`, `@nestjs/common ^12.0.0`, `class-transformer ^0.5.1`,
+`@unifyamerica/demleague-plugin-sdk ^0.2.0`, `@nestjs/common ^12.0.0`, `class-transformer ^0.5.1`,
 `class-validator ^0.15.0`, `reflect-metadata ^0.2.0`. Dev dependencies are the same packages plus
 `@nestjs/core`, `@nestjs/testing`, `jest`, `ts-jest`, `@types/jest`, `@types/node`, `rxjs`, `typescript`.
 Jest uses `rootDir: "src"`, `testRegex: ".*\\.spec\\.ts$"`, a ts-jest transform,
@@ -863,7 +857,7 @@ import { type PluginManifest, SDK_API_VERSION } from '@unifyamerica/demleague-pl
 export const ACME_NOTES_MANIFEST: PluginManifest = {
   sdkApiVersion: SDK_API_VERSION,
   namespace: 'acme.notes',
-  version: '0.1.0',
+  version: '0.1.1',
   displayName: 'Notes',
   description: 'Private notes for each user in each of their organizations, with a welcome note when they join one',
   permissions: ['users:read', 'data:read', 'data:write'],
