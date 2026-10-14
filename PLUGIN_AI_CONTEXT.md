@@ -797,7 +797,7 @@ pins, requires the installed tarball (lockfile integrity) to carry an attestatio
 workflow on `main` for the `v<version>` tag of `unifyamerica/<package short name>`
 (`gh attestation verify`), applies the same pin and provenance checks to the SDK (one exact version in both
 `package.json` files, attested by `unifyamerica/demleague-plugin-sdk`'s release workflow), and runs the boot gate (`loadPlugins()` against the registry). Peer dependencies are
-`@unifyamerica/demleague-plugin-sdk ^0.1.0`, `@nestjs/common ^12.0.0`, `class-transformer ^0.5.1`,
+`@unifyamerica/demleague-plugin-sdk ^0.2.0`, `@nestjs/common ^12.0.0`, `class-transformer ^0.5.1`,
 `class-validator ^0.15.0`, `reflect-metadata ^0.2.0`. Dev dependencies are the same packages plus
 `@nestjs/core`, `@nestjs/testing`, `jest`, `ts-jest`, `@types/jest`, `@types/node`, `rxjs`, `typescript`.
 Jest uses `rootDir: "src"`, `testRegex: ".*\\.spec\\.ts$"`, a ts-jest transform,
@@ -857,7 +857,7 @@ import { type PluginManifest, SDK_API_VERSION } from '@unifyamerica/demleague-pl
 export const ACME_NOTES_MANIFEST: PluginManifest = {
   sdkApiVersion: SDK_API_VERSION,
   namespace: 'acme.notes',
-  version: '0.1.0',
+  version: '0.1.1',
   displayName: 'Notes',
   description: 'Private notes for each user in each of their organizations, with a welcome note when they join one',
   permissions: ['users:read', 'data:read', 'data:write'],
