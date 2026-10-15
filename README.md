@@ -49,6 +49,9 @@ The core team creates it from this repository and adds the vendor as an outside 
    - the UI may only import `@unifyamerica/demleague-plugin-sdk/vue`, `vue`, `primevue`, `primeicons`, its own files and
      the manifest
    - no `process.env`, `eval` or `require`
+   - no iframes in the UI (nor `frame`, `object`, `embed`), in templates, render functions or
+     `createElement()`, and no raw HTML (`v-html`, `innerHTML`, `insertAdjacentHTML`, `document.write`). The
+     SPA's CSP (`frame-src 'none'`) blocks them anyway.
 5. Write unit tests with `@unifyamerica/demleague-plugin-sdk/testing` (Jest, `src/**/*.spec.ts`) and
    `@unifyamerica/demleague-plugin-sdk/vue/testing` (Vitest, `src/ui/**/*.spec.ts`).
 6. Build with `npm run build` (it clears `dist/` first):
