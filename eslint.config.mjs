@@ -24,6 +24,14 @@ const UI_ALLOWED_PACKAGES = [
   'primeicons/[a-z./-]+',
 ];
 
+// Elements that embed another document. Plugin UIs render into the SPA's own page, never a framed one.
+const FRAME_ELEMENTS = ['iframe', 'frame', 'frameset', 'object', 'embed'];
+const FRAME_ELEMENTS_REGEX = `/^(?:${FRAME_ELEMENTS.join('|')})$/i`;
+const NO_FRAMES =
+  'Plugin UIs may not include, create or inject iframes (or frame, object, embed). Build the UI with Vue and PrimeVue.';
+const NO_HTML =
+  'Plugin UIs may not write raw HTML (v-html, innerHTML, insertAdjacentHTML, document.write). Render it with Vue.';
+
 const escape = (name) => name.replace(/[./]/g, (c) => `\\${c}`);
 const onlyImports = (packages, relative, message) => [
   'error',
@@ -93,6 +101,42 @@ export default tseslint.config(
         },
       ],
       'no-restricted-globals': ['error', 'eval', 'Function', 'require'],
+    },
+  },
+  // No iframes (or other embedded documents) in the UI: not in templates, render functions or HTML strings.
+  // The SPA's CSP blocks them anyway (frame-src 'none'), and the shipped-code check looks for them too.
+  {
+    files: ['src/ui/**/*.{ts,vue}'],
+    ignores: ['src/**/*.spec.ts'],
+    rules: {
+      'vue/no-restricted-html-elements': [
+        'error',
+        { element: FRAME_ELEMENTS, message: NO_FRAMES },
+      ],
+      'vue/no-restricted-static-attribute': [
+        'error',
+        { key: 'is', value: FRAME_ELEMENTS_REGEX, message: NO_FRAMES },
+        { key: 'srcdoc', message: NO_FRAMES },
+      ],
+      'vue/no-v-html': 'error',
+      'no-restricted-syntax': [
+        'error',
+        {
+          // h('iframe'), document.createElement('iframe'), createVNode('iframe'), …
+          selector: `CallExpression > Literal.arguments[value=${FRAME_ELEMENTS_REGEX}]`,
+          message: NO_FRAMES,
+        },
+        {
+          selector:
+            'MemberExpression[property.name=/^(?:innerHTML|outerHTML|srcdoc)$/], Property[key.name=/^(?:innerHTML|outerHTML|srcdoc)$/]',
+          message: NO_HTML,
+        },
+        {
+          selector:
+            'CallExpression[callee.property.name=/^(?:insertAdjacentHTML|createContextualFragment|setHTMLUnsafe)$/], CallExpression[callee.object.name="document"][callee.property.name=/^(?:write|writeln)$/]',
+          message: NO_HTML,
+        },
+      ],
     },
   },
   {

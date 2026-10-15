@@ -79,6 +79,11 @@ Check every one of these before you present code.
     axios), `defineStore()` (never Pinia's), `useRouter()` (never vue-router), `useI18n()`, `useToast()`,
     `useConfirm()`, `useAbility()`, `useCurrentUser()`, `useCurrentOrganization()`. Composables are called
     at runtime (in `setup()`, a store's setup, a handler), never at module top level.
+    **No iframes**: never include, create or inject an `<iframe>` (nor `<frame>`, `<object>`, `<embed>`), not
+    in templates, `<component is>`, `h()` or `document.createElement()`, and never write raw HTML
+    (`v-html`, `innerHTML`, `outerHTML`, `srcdoc`, `insertAdjacentHTML`, `document.write`). Lint and the
+    install PR's check of `dist/ui` reject it, and the SPA's CSP (`frame-src 'none'; object-src 'none'`)
+    blocks it at runtime. Link out with a normal `<a href>` instead.
 17. **Menu entries need slots.** `mainMenu` needs `'main-menu'`, `profileMenu` needs `'profile-menu'` in
     `manifest.ui.slots`, and each slot must be in the registry's `approvedUiSlots`. Pages need no slot. An
     entry is a link (`to`) or a group of links (`children`, one level), never both.
@@ -792,7 +797,8 @@ The repo's `.npmrc` has `@unifyamerica:registry=https://npm.pkg.github.com`; the
 other access is needed) lives only in the user's `~/.npmrc`, never in the
 repo. The scripts are `build` (clears `dist/`, then `tsc -p tsconfig.build.json`), `test` (`jest`), `lint`,
 `type-check`. On the install PR, the DemLeagueOS "Plugin contract" CI job re-checks the shipped `dist/`
-against the lint import allowlists (and no `process.env`, `eval`, `Function` constructor), requires exact
+against the lint import allowlists (and no `process.env`, `eval`, `Function` constructor, nor iframes or
+raw HTML in `dist/ui`), requires exact
 pins, requires the installed tarball (lockfile integrity) to carry an attestation from the org's release
 workflow on `main` for the `v<version>` tag of `unifyamerica/<package short name>`
 (`gh attestation verify`), applies the same pin and provenance checks to the SDK (one exact version in both
@@ -845,7 +851,12 @@ CommonJS).
 **`eslint.config.mjs`:** restrict API imports to the allowed list (rule 1, excluding spec files and
 `src/ui`), restrict `src/ui` imports to rule 15's list (relative imports can't climb out of `src/ui` except to
 `manifest`), add `eslint-plugin-vue` (`flat/essential`, browser globals for `.vue`), and forbid
-`process.env`, `eval`, `Function` and `require` in `src/**/*.{ts,vue}`.
+`process.env`, `eval`, `Function` and `require` in `src/**/*.{ts,vue}`. In non-test `src/ui/**`, forbid
+iframes (rule 16): `vue/no-restricted-html-elements` for `iframe`, `frame`, `frameset`, `object`, `embed`;
+`vue/no-restricted-static-attribute` for `is` naming one of them and for `srcdoc`; `vue/no-v-html`; and
+`no-restricted-syntax` for a call argument naming one of them (`h('iframe')`, `createElement('iframe')`),
+`innerHTML`/`outerHTML`/`srcdoc`, `insertAdjacentHTML`, `createContextualFragment`, `setHTMLUnsafe` and
+`document.write`.
 
 ## 5. Reference implementation patterns
 
@@ -1362,6 +1373,7 @@ describe('NotesPage', () => {
 - [ ] Every `@RequireAbility()` subject is `User`, `Organization` or declared in `manifest.abilities`, and
       every endpoint the UI calls carries the right one
 - [ ] Only allowed imports and injectables. No `process.env`, `console`, `require`, `eval` or `Function`.
+- [ ] No iframes, `frame`, `object` or `embed` in the UI, and no raw HTML (`v-html`, `innerHTML`, …)
 - [ ] No `imports`, `@Global()` or `APP_*` providers
 - [ ] All body and query inputs use bounded `class-validator` DTOs
 - [ ] Per-user reads and writes filter on the owner, others' records give 404, and no code stores or relies
