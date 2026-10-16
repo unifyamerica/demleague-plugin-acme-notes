@@ -17,6 +17,22 @@ Endpoints are mounted at `/plugins/acme/notes`. Notes are kept per organization 
 The UI adds a **Notes** page to the sidebar and a **Notes overview** page (org admins only) to the account menu.
 Both live under `/apps/acme/notes` and work in the organization picked in the SPA's header.
 
+## Operations other modules can call
+
+Other modules reach notes only through these exported operations (`exports` in `src/manifest.ts`,
+implemented in `src/notes/notes.exports.ts`), called through the host's `ModuleCallsProxy`. Each runs for the
+caller's acting user, in the current organization, on that user's own notes, and needs the same ability as the
+matching endpoint:
+
+| Operation | Who may call it | Ability | Input | Result |
+| --- | --- | --- | --- | --- |
+| `notes.list` | any module the core team approves (`'*'`) | `read Note` | `{ limit?: 1–50 (10), pinned?: boolean }` or nothing | `{ id, title, pinned, updatedAt (ISO) }[]`, pinned first, then latest |
+| `notes.create` | `acme.tasks` | `create Note` | `{ title: 1–200 chars, body?: ≤ 10,000 chars, pinned?: boolean }` | `{ id, title }`; emits `acme.notes.note-created` |
+
+Invalid input is a `PluginValidationError` (400). These shapes are a public API: they change only by adding new
+operations. [demleague-plugin-acme-tasks](https://github.com/unifyamerica/demleague-plugin-acme-tasks) is the
+example caller.
+
 ## Building with an AI agent
 
 [`PLUGIN_AI_CONTEXT.md`](PLUGIN_AI_CONTEXT.md) is the plugin contract written for AI coding agents (Claude
@@ -42,10 +58,14 @@ The core team creates it from this repository and adds the vendor as an outside 
    dependency injection, silently skips validation or loads a second Vue.
 3. Declare everything in `src/manifest.ts`, which imports from `@unifyamerica/demleague-plugin-sdk/manifest` so the UI
    can use it too: permissions, endpoints, collections, events, limits, `abilities` (who may do what, per
-   organization role) and `ui.slots` (the SPA menus you add entries to). Keep its `version` in sync with
+   organization role), `ui.slots` (the SPA menus you add entries to), and, if your module works with others,
+   `exports` (operations other modules may call; drop `notes.exports.ts` and the template's `exports` if you
+   offer none) and `calls` (other modules' operations you call; see
+   [demleague-plugin-acme-tasks](https://github.com/unifyamerica/demleague-plugin-acme-tasks)). Keep its `version` in sync with
    `package.json`; a spec checks this.
 4. Keep the ESLint guardrails (`eslint.config.mjs`):
-   - the API part may only import the packages above
+   - the API part may only import the packages above (never another plugin's package: call its exported
+     operations instead)
    - the UI may only import `@unifyamerica/demleague-plugin-sdk/vue`, `vue`, `primevue`, `primeicons`, its own files and
      the manifest
    - no `process.env`, `eval` or `require`
@@ -82,8 +102,9 @@ The core team creates it from this repository and adds the vendor as an outside 
 8. Ask the core team to install it. They open the PR on DemLeagueOS that:
    - pins the exact version in `api/package.json` (and `frontend/package.json` for the UI)
    - adds the module to `api/src/plugins.config.ts` and the `./ui` entry to `frontend/src/plugins.config.ts`
-   - adds the namespace, permissions, public endpoints, ability grants (`approvedAbilityGrants`) and UI
-     slots (`approvedUiSlots`) you request to `api/namespace-registry.json`
+   - adds the namespace, permissions, public endpoints, ability grants (`approvedAbilityGrants`), UI
+     slots (`approvedUiSlots`) and calls to other modules (`approvedCalls`) you request to
+     `api/namespace-registry.json`
 
 `.github/workflows/ci.yml` runs the same checks on every push and pull request. The shared release
 workflow lives in [demleague-plugin-workflows](https://github.com/unifyamerica/demleague-plugin-workflows),
