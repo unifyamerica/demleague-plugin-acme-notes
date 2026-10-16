@@ -30,7 +30,7 @@ const FRAME_ELEMENTS_REGEX = `/^(?:${FRAME_ELEMENTS.join('|')})$/i`;
 const NO_FRAMES =
   'Plugin UIs may not include, create or inject iframes (or frame, object, embed). Build the UI with Vue and PrimeVue.';
 const NO_HTML =
-  'Plugin UIs may not write raw HTML (v-html, innerHTML, insertAdjacentHTML, document.write). Render it with Vue.';
+  'Plugin UIs may not write raw HTML (v-html, innerHTML, insertAdjacentHTML, document.write). Render it with Vue, or HTML with the SDK\'s v-safe-html directive.';
 
 const escape = (name) => name.replace(/[./]/g, (c) => `\\${c}`);
 const onlyImports = (packages, relative, message) => [
