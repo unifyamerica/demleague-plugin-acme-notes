@@ -10,7 +10,7 @@ import {
 export const ACME_NOTES_MANIFEST: PluginManifest = {
   sdkApiVersion: SDK_API_VERSION,
   namespace: 'acme.notes',
-  version: '0.1.1',
+  version: '0.2.0',
   displayName: 'Notes',
   description:
     'Private notes for each user in each of their organizations, with a welcome note when they join one',
@@ -51,6 +51,21 @@ export const ACME_NOTES_MANIFEST: PluginManifest = {
     Overview: { organization: { org_admin: ['read'] } },
   },
   ui: { slots: ['main-menu', 'profile-menu'] },
+  // Operations other modules may call through the host (implemented in `notes/notes.exports.ts`). Each runs for
+  // the acting user, in the current organization, and needs the same ability as the matching endpoint. Who may
+  // call: any module the core team approves (`'*'`), or only the ones listed.
+  exports: {
+    'notes.list': {
+      summary: "The acting user's latest notes, pinned first",
+      ability: { action: 'read', subject: 'Note' },
+      consumers: '*',
+    },
+    'notes.create': {
+      summary: 'Create a note for the acting user',
+      ability: { action: 'create', subject: 'Note' },
+      consumers: ['acme.tasks'],
+    },
+  },
   // What this plugin needs, at most what the registry approves (the SDK defaults where it sets no ceiling)
   limits: {
     requestsPerMinute: 120,
