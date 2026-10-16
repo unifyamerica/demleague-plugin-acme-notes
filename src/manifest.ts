@@ -10,7 +10,7 @@ import {
 export const ACME_NOTES_MANIFEST: PluginManifest = {
   sdkApiVersion: SDK_API_VERSION,
   namespace: 'acme.notes',
-  version: '0.3.0',
+  version: '0.3.1',
   displayName: 'Notes',
   description:
     'Private notes for each user in each of their organizations, with a welcome note when they join one',

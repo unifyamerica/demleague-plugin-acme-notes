@@ -19,7 +19,7 @@ the SPA when it bundles the UI. Code that violates it won't load, or will fail i
 requirement can't be met within the contract, say so plainly and propose the closest conforming design. Never
 work around the contract.
 
-**Contract version:** `@unifyamerica/demleague-plugin-sdk` 0.4.x, `SDK_API_VERSION = 1`, NestJS `^12`, `class-validator`
+**Contract version:** `@unifyamerica/demleague-plugin-sdk` 0.5.x, `SDK_API_VERSION = 1`, NestJS `^12`, `class-validator`
 `^0.15`, `class-transformer` `^0.5.1`, Node 24, TypeScript ~6.0, Jest + ts-jest (API). UI: Vue `^3.5`,
 Pinia `^4` (provided through the SDK), PrimeVue `^4.5`, Tailwind utility classes, Vite `^8` (library mode),
 vue-tsc `^3.3`, Vitest `^5` + `@vue/test-utils` + jsdom.
@@ -34,13 +34,14 @@ Check every one of these before you present code.
    built-ins (`fs`, `path`). Never import `@nestjs/core`, mongoose, mongodb, axios, lodash or any other
    package in plugin source.
 2. **No** `process.env`, `eval`, `new Function`, `require`, or `console` (API and UI). Use `PluginLogger` in
-   the API.
+   the API. **No timers for scheduling** (`setTimeout`/`setInterval` loops, cron libraries): the API runs as many
+   instances, so use jobs (§2.7c).
 3. Declare the plugin with **`@PluginModule({ manifest, controllers, providers })`**, never `@Module()`. It has
    **no `imports`**. Never use `@Global()` or providers whose token is `APP_GUARD`, `APP_INTERCEPTOR`,
    `APP_FILTER` or `APP_PIPE`.
 4. **Dependency injection:** inject only `UsersProxy`, `DataProxy`, `EventBusProxy`, `ModuleLifecycleProxy`,
-   `ModuleCallsProxy`, `PluginContext`, `PluginLogger`, Nest's `Reflector`, and the plugin's own classes listed
-   in `providers`.
+   `ModuleCallsProxy`, `JobsProxy`, `PluginContext`, `PluginLogger`, Nest's `Reflector`, and the plugin's own
+   classes listed in `providers`.
    Never inject `ModuleRef`, core services, config services or DB connections.
 5. **Every controller route must be declared** in `manifest.endpoints`, with the same method and the path
    `'/' + controllerPath + '/' + handlerPath` (normalized). Every declared endpoint must exist. There can't
@@ -103,6 +104,11 @@ Check every one of these before you present code.
     an operation, declare it in `manifest.exports` with the ability its matching endpoint has and the narrowest
     `consumers`, implement it with `@ExportedOperation()` on a class provider, validate its plain-JSON input
     yourself and return plain JSON only.
+21. **Deferred and recurring work only through jobs** (§2.7c). Declare each job in `manifest.jobs` with exactly
+    one `@JobHandler()` method on a class provider, and recurring runs in `manifest.schedules`; request them in
+    the registry's `approvedJobs` / `approvedSchedules` (with the cron expression) / `approvedGlobalSchedules`.
+    Schedule with `JobsProxy`, using a dedup `key` for anything that must not be scheduled twice. Jobs run **at
+    least once**: every handler checks the state it's about to change before changing it.
 
 ## 2. Public API of `@unifyamerica/demleague-plugin-sdk`
 
@@ -110,8 +116,8 @@ This section is the complete public API. Don't use anything that isn't listed he
 
 | Entry | Format | Used by | Contents |
 | --- | --- | --- | --- |
-| `@unifyamerica/demleague-plugin-sdk` | CJS | API code | everything in §2.1–2.9a, including §2.7a–2.7b (and all of `./manifest`) |
-| `@unifyamerica/demleague-plugin-sdk/manifest` | CJS + ESM | `src/manifest.ts` | NestJS-free manifest contract: `SDK_API_VERSION`, permissions, manifest types, abilities/roles, UI slots, events, lifecycle types, the module call contract (§2.7b: `OPERATION_NAME_PATTERN`, `ANY_CONSUMER`, `MAX_CALL_PAYLOAD_BYTES`, `MAX_CALL_DEPTH`, export/call types, `isPlainJson`, `copyCallPayload`), `validateManifest`, `validateAbilityGrants`, `normalizeEndpointPath`, `NAMESPACE_PATTERN`, `RESERVED_VENDORS` |
+| `@unifyamerica/demleague-plugin-sdk` | CJS | API code | everything in §2.1–2.9a, including §2.7a–2.7c (and all of `./manifest`) |
+| `@unifyamerica/demleague-plugin-sdk/manifest` | CJS + ESM | `src/manifest.ts` | NestJS-free manifest contract: `SDK_API_VERSION`, permissions, manifest types, abilities/roles, UI slots, events, lifecycle types, the module call contract (§2.7b: `OPERATION_NAME_PATTERN`, `ANY_CONSUMER`, `MAX_CALL_PAYLOAD_BYTES`, `MAX_CALL_DEPTH`, export/call types, `isPlainJson`, `copyCallPayload`), the jobs contract (§2.7c: job/schedule types, constants and helpers), `validateManifest`, `validateAbilityGrants`, `normalizeEndpointPath`, `NAMESPACE_PATTERN`, `RESERVED_VENDORS` |
 | `@unifyamerica/demleague-plugin-sdk/testing` | CJS | API specs | §2.10 |
 | `@unifyamerica/demleague-plugin-sdk/vue` | ESM (browser) | UI code | §2.11 (re-exports all of `./manifest` and the `PluginOrganization` type) |
 | `@unifyamerica/demleague-plugin-sdk/vue/testing` | ESM | UI specs | §2.12 |
@@ -124,6 +130,7 @@ export const SDK_IDENTITY: unique symbol;                 // host-internal (dete
 export const PLUGIN_DEFINITION_METADATA = 'demleague:plugin:definition';
 export const PLUGIN_REQUIRED_ABILITY_METADATA = 'demleague:plugin:required-ability';
 export const PLUGIN_EXPORTED_OPERATION_METADATA = 'demleague:plugin:exported-operation';
+export const PLUGIN_JOB_HANDLER_METADATA = 'demleague:plugin:job-handler';
 export const PLUGIN_ACTOR_REQUEST_KEY = 'pluginActor';
 ```
 
@@ -168,7 +175,8 @@ export interface PluginResourceLimits {
   requestsPerMinute?: number; requestsPerMinutePerUser?: number; dbOperationsPerMinute?: number;
   requestTimeoutMs?: number; eventHandlerTimeoutMs?: number; lifecycleHookTimeoutMs?: number;
   maxDocumentBytes?: number; maxDocuments?: number; maxStorageBytes?: number; callsPerMinute?: number;
-  maxMemoryMb?: number;
+  maxMemoryMb?: number; jobsPerMinute?: number; maxPendingJobs?: number; jobTimeoutMs?: number;
+  maxConcurrentJobs?: number;
 }
 
 export const DEFAULT_RESOURCE_LIMITS: Required<PluginResourceLimits> = {
@@ -176,6 +184,7 @@ export const DEFAULT_RESOURCE_LIMITS: Required<PluginResourceLimits> = {
   requestTimeoutMs: 10_000, eventHandlerTimeoutMs: 5_000, lifecycleHookTimeoutMs: 60_000,
   maxDocumentBytes: 64 * 1024,
   maxDocuments: 10_000, maxStorageBytes: 50 * 1024 * 1024, callsPerMinute: 600, maxMemoryMb: 128,
+  jobsPerMinute: 120, maxPendingJobs: 10_000, jobTimeoutMs: 30_000, maxConcurrentJobs: 2,
 };
 
 export interface PluginManifest {
@@ -194,6 +203,8 @@ export interface PluginManifest {
   ui?: PluginUiDeclaration;              // menu slots the UI uses (pages need none)
   exports?: PluginExports;               // operations other modules may call (§2.7b)
   calls?: PluginCalls;                   // other modules' operations this plugin calls (§2.7b)
+  jobs?: PluginJobs;                     // jobs, each run by one @JobHandler() method (§2.7c)
+  schedules?: PluginSchedules;           // recurring runs of those jobs (§2.7c)
 }
 ```
 
@@ -267,13 +278,19 @@ in `@PluginModule()` and again at startup):
   `consumers` (`'*'`, or a non-empty array of namespaces, not the plugin's own, without duplicates).
 - `calls` is an object. Each key is a namespace other than the plugin's own, with
   `{ operations: string[] }`: non-empty, operation names, without duplicates.
+- `jobs` is an object. Each name matches `JOB_NAME_PATTERN` (`/^[a-z][a-z0-9-]{0,40}$/`). Each declaration has
+  only `summary` (string), `timeoutMs` (positive integer) and `maxAttempts` (integer 1–10).
+- `schedules` is an object. Each name matches `JOB_NAME_PATTERN`. Each declaration has only `summary`, `cron`
+  (five fields, `isCronExpression`), `timeZone` (an IANA zone, `isTimeZone`), `job` (declared in `jobs`) and
+  `scope` (`organization` or `global`).
 
 `validateAbilityGrants(abilities: PluginAbilities): string[]` applies the `abilities` rules on their own (the
 host uses it on the registry's `approvedAbilityGrants`).
 
 **Effective limits:** `min(declared ?? default, registryCeiling ?? default, platformMax)`. Declaring can
 only lower a limit. Platform maximums are: rpm 6000, per-user rpm 6000, db ops/min 12000, request timeout
-30000 ms, handler timeout 30000 ms, doc 1 MB, docs 1,000,000, storage 5 GB, calls/min 6000, memory 512 MB.
+30000 ms, handler timeout 30000 ms, doc 1 MB, docs 1,000,000, storage 5 GB, calls/min 6000, memory 512 MB,
+jobs/min 6000, pending jobs 1,000,000, job timeout 600000 ms, concurrent jobs 8.
 
 **Enforcement:** `requestsPerMinute` and `dbOperationsPerMinute` are per plugin (429).
 `requestsPerMinutePerUser` is per user (429), and public endpoints count only towards the plugin total.
@@ -282,7 +299,9 @@ collections (507), and removing documents frees space. `requestTimeoutMs` makes 
 while the handler keeps running. `eventHandlerTimeoutMs` is logged as a handler error.
 `lifecycleHookTimeoutMs` (max 600 000) fails the hook, which is retried; it keeps running. `maxMemoryMb` is
 advisory. `callsPerMinute` limits the calls other modules make to the plugin's exported operations (429 for
-the caller). Sizes are the JSON of the plugin's own fields.
+the caller). `jobsPerMinute` and `maxPendingJobs` (pending across organizations) reject `JobsProxy.schedule()`
+with 429. `jobTimeoutMs` fails a job run (retried; its code keeps running); a job's `timeoutMs` can only lower
+it. `maxConcurrentJobs` is per API instance. Sizes are the JSON of the plugin's own fields.
 
 ### 2.4 Decorators
 
@@ -319,6 +338,13 @@ export function ExportedOperation(operation: string): MethodDecorator;
 // usage: @ExportedOperation('notes.list') list(input: ListInput | null, call: PluginCallInfo) { … }
 export interface ExportedOperationMethod { operation: string; methodName: string }
 export function getExportedOperations(target: abstract new (...args: never[]) => unknown): ExportedOperationMethod[]; // host/harness use
+
+// Method decorator: runs one of the plugin's jobs (§2.7c), on a class provider in `providers`. Throws at
+// decoration time for a malformed name.
+export function JobHandler(job: string): MethodDecorator;
+// usage: @JobHandler('round-end') async roundEnd(job: PluginJob<{ assemblyId: string }>) { … }
+export interface JobHandlerMethod { job: string; methodName: string }
+export function getJobHandlers(target: abstract new (...args: never[]) => unknown): JobHandlerMethod[]; // host/harness use
 ```
 
 ### 2.5 DTOs (always plain copies)
@@ -385,6 +411,12 @@ export abstract class ModuleLifecycleProxy {   // needs manifest.lifecycle.<hook
 }
 export abstract class ModuleCallsProxy {      // §2.7b; needs manifest.calls[namespace].operations to list it
   call<TResult = JsonValue>(namespace: string, operation: string, input?: JsonValue): Promise<TResult>;
+}
+export abstract class JobsProxy {             // §2.7c; in the current organization (tenant()), or none without one
+  schedule(job: string, options?: ScheduleJobOptions): Promise<PluginJobInfo>;  // the pending/running job with the same key if any
+  cancel(key: string): Promise<boolean>;                                       // pending only; false if none
+  reschedule(key: string, runAt: Date | string): Promise<PluginJobInfo | null>; // pending only
+  find(key: string): Promise<PluginJobInfo | null>;                            // the latest with that key, any status
 }
 export abstract class PluginContext {
   readonly namespace: string;
@@ -539,6 +571,73 @@ export function copyCallPayload(value: unknown, what: string): JsonValue;     //
   → input is plain JSON within the limit → provider's `callsPerMinute` → export's `ability` for the user in the
   tenant → run as the provider, with timeout.
 
+### 2.7c Scheduled jobs
+
+```ts
+export const JOB_NAME_PATTERN = /^[a-z][a-z0-9-]{0,40}$/;           // job and schedule names
+export const JOB_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,199}$/;
+export const RESERVED_JOB_KEY_PREFIX = 'schedule:';                 // the host's (schedule occurrences)
+export const MAX_JOB_PAYLOAD_BYTES = 32 * 1024;
+export const MAX_JOB_DELAY_MS = 366 * 24 * 60 * 60 * 1000;          // at most a year ahead
+export const DEFAULT_JOB_MAX_ATTEMPTS = 3;
+export const MAX_JOB_MAX_ATTEMPTS = 10;
+export const JobStatuses = { PENDING: 'pending', RUNNING: 'running', DONE: 'done', FAILED: 'failed', CANCELED: 'canceled' } as const;
+export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled';
+export const ScheduleScopes = { ORGANIZATION: 'organization', GLOBAL: 'global' } as const;
+export type ScheduleScope = 'organization' | 'global';
+export interface PluginJobDeclaration { summary?: string; timeoutMs?: number; maxAttempts?: number }
+export type PluginJobs = Record<string, PluginJobDeclaration>;
+export interface PluginScheduleDeclaration {
+  summary?: string;
+  cron: string;            // five fields, e.g. '0 3 * * *'
+  timeZone?: string;       // IANA, default 'UTC'
+  job: string;             // declared in manifest.jobs
+  scope: ScheduleScope;    // organization: once per org the module is on in, in it; global: once, in no org
+}
+export type PluginSchedules = Record<string, PluginScheduleDeclaration>;
+export interface ScheduleJobOptions {
+  runAt?: Date | string;   // past or omitted (no delayMs): as soon as possible
+  delayMs?: number;        // instead of runAt
+  payload?: JsonValue;     // plain JSON, ≤ 32 KB, copied
+  key?: string;            // dedup per organization while pending/running; also cancel/reschedule/find by it
+  expiresAt?: Date | string; // canceled instead of run after this
+}
+export interface PluginJobInfo { id: string; name: string; key: string | null; status: JobStatus; runAt: Date; attempts: number; lastError: string | null; createdAt: Date }
+export interface PluginJob<TPayload extends JsonValue = JsonValue> {   // what a @JobHandler() method gets (frozen)
+  id: string; name: string; key: string | null;
+  payload: Readonly<TPayload>;
+  scheduledFor: string;    // ISO, when it was due (a run can be late)
+  attempt: number;         // 1, 2…
+  schedule: string | null; // the schedule it's an occurrence of
+}
+export type PluginJobHandler<TPayload extends JsonValue = JsonValue> = (job: PluginJob<TPayload>) => void | Promise<void>;
+export const isCronExpression: (value: unknown) => value is string;
+export const isTimeZone: (value: unknown) => value is string;
+export const jobRetryDelayMs: (attempts: number) => number;          // 5 s, 10 s, 20 s… up to 1 h
+export interface ResolvedScheduleOptions { runAt: Date; payload: JsonValue; key: string | null; expiresAt: Date | null }
+export function resolveScheduleOptions(options: ScheduleJobOptions | undefined, now: Date): ResolvedScheduleOptions; // host/harness use; PluginValidationError
+export function copyJobPayload(value: unknown): JsonValue;           // PluginValidationError / PluginPayloadTooLargeError
+```
+
+- **Why:** the API runs as many instances on several clusters; the host keeps jobs in its database and runs
+  each on exactly one instance (an atomic lease), within ~1–2 s of `runAt`.
+- **At least once:** an instance dying mid-run hands the job to another. Handlers check the state before changing
+  it (e.g. "is the round still open?") so a second run does nothing.
+- **Context:** no acting user (`actor()` null), in the organization it was scheduled in (`tenant()`), under the
+  plugin's own permissions, like an event handler. No module calls from a job (they need an actor).
+- **Module off:** jobs don't run while the module is off in their organization. A one-off job waits (or is
+  canceled at `expiresAt`); a schedule occurrence is skipped and the schedule resumes once it's back on. "Remove
+  data" deletes the org's jobs. Cancel what mustn't run late in `onDisabled`.
+- **Failures:** a throw fails the run; it's retried after `jobRetryDelayMs(attempt)` up to `maxAttempts`, then
+  `failed` (org admins see it on the Modules page and can retry it). A run over its timeout counts as failed and
+  is retried while its code keeps running.
+- **Schedules:** each has one pending occurrence per organization the module is on in (or one, for a global
+  schedule), at the next cron time in its time zone; each run creates the next, skipping missed ones.
+- **Scheduling from anywhere:** endpoints, other jobs, event handlers and lifecycle hooks; the job is stored in
+  the current organization. Each `JobsProxy` call counts as a DB operation.
+- Errors: `PluginUndeclaredJobError`, `PluginValidationError`, `PluginPayloadTooLargeError`,
+  `PluginQuotaExceededError` (`jobsPerMinute`, `maxPendingJobs`).
+
 ### 2.8 Query language (`PluginQuery`)
 
 ```ts
@@ -587,6 +686,7 @@ export function normalizeQuery(query?: PluginQuery): Required<PluginQuery>;
 | `PluginCallUnavailableError` (`provider` field) | 503 | `PLUGIN_CALL_UNAVAILABLE` |
 | `PluginCallFailedError` (`provider` field) | 502 | `PLUGIN_CALL_FAILED` |
 | `PluginCallDepthExceededError` | 508 | `PLUGIN_CALL_DEPTH_EXCEEDED` |
+| `PluginUndeclaredJobError` | 500 | `PLUGIN_UNDECLARED_JOB` |
 
 The host renders them as JSON:API errors (`{ errors: [{ status, code, title, detail }] }`), and hides the
 details of 5xx errors. For plugin-specific errors, throw `@nestjs/common` exceptions (`NotFoundException`,
@@ -615,7 +715,7 @@ export interface PluginTestingOptions {
   actor?: PluginActor | null;            // default null; like the host, actor() only returns their membership in `tenant`
   tenant?: PluginOrganization | null;    // the request's X-Tenant organization; default null
   users?: PluginUser[];
-  organizations?: PluginOrganization[];  // what events.deliver() and lifecycle run in, by id
+  organizations?: PluginOrganization[];  // what events.deliver(), lifecycle and jobs run in, by id
   permissions?: PluginPermission[];      // override manifest permissions to test denials
 }
 export interface PluginTestHarness {
@@ -627,6 +727,7 @@ export interface PluginTestHarness {
   lifecycle: InMemoryModuleLifecycleProxy; // enable / disable / upgrade(orgId, event?): run the hooks like the host (actor null, tenant = that org from `organizations`; rejects on first error); removeData(orgId, event?): onDataRemoved, then deletes the org's records from `data`; registeredHooks()
   logger: RecordingPluginLogger;         // .messages: { level, message }[]
   calls: InMemoryModuleCallsProxy;       // stub(namespace, operation, (input, { actor, tenant }) => result); unstub(namespace); .calls: RecordedCall[] ({ namespace, operation, input }). No stub = PluginCallUnavailableError. Refuses undeclared calls and calls without actor + tenant; copies input/result; wraps non-SDK errors in PluginCallFailedError
+  jobs: InMemoryJobsProxy;               // .jobs: InMemoryJob[] (all, any status); pending() (soonest first); runDue(at = now): Promise<JobRunResult[]> (every pending job due at `at`, incl. ones those runs schedule if due); run(keyOrId, at?); runSchedule(name, organizationId = null, at?). Runs like the host: actor null, tenant = the job's org (from `organizations`), restored after; a failure → pending again at at + jobRetryDelayMs(attempt) until maxAttempts, then failed; expired → canceled. JobRunResult = { id, name, key, status, error }. Checks declared jobs, options, payload, dedup keys, maxPendingJobs; no timeouts, jobsPerMinute, concurrency or module on/off
   // Runs one of YOUR exported operations as `caller` would through the host: exported to the caller (else throws),
   // actor + tenant required, the export's ability from your manifest's grants (PluginActorForbiddenError),
   // copies input/result, sets context.caller(), wraps non-SDK errors and non-JSON results in PluginCallFailedError
@@ -636,9 +737,9 @@ export interface PluginTestHarness {
 export function createPluginTestHarness(plugin: Type<unknown>, options?: PluginTestingOptions): Promise<PluginTestHarness>;
 export function createPluginTestingModule(plugin: Type<unknown>, options?: PluginTestingOptions): TestingModuleBuilder; // for overrideProvider()
 export function matchesFilter(record: Record<string, unknown>, filter?: PluginFilter): boolean;
-// also exported: TestPluginContext (+ setCaller(namespace | null)), InMemoryUsersProxy, InMemoryDataProxy,
-// InMemoryStorageUsage, RecordingEventBusProxy, RecordingPluginLogger, InMemoryModuleCallsProxy,
-// types RecordedCall, StubbedCallScope ({ actor, tenant }), StubbedOperation
+// also exported: TestPluginContext (+ setCaller(namespace | null), runAsSystem(tenant, fn)), InMemoryUsersProxy,
+// InMemoryDataProxy, InMemoryStorageUsage, RecordingEventBusProxy, RecordingPluginLogger, InMemoryModuleCallsProxy,
+// InMemoryJobsProxy, types RecordedCall, StubbedCallScope ({ actor, tenant }), StubbedOperation, InMemoryJob, JobRunResult
 ```
 
 The harness enforces permissions, declared collections and events, document safety and size, storage limits,
@@ -830,7 +931,10 @@ export function uninstallTestPluginHost(): void;   // in afterEach
 covers any action), when a `manifest.ui.slots` entry isn't in `approvedUiSlots`, or when a
 `@RequireAbility()` subject is neither `User`/`Organization` nor declared in `manifest.abilities`, when
 `manifest.exports` and the `@ExportedOperation()` methods don't match exactly, when a `manifest.calls` operation
-isn't in `approvedCalls`, or when a called operation isn't exported to the plugin by its (loaded) provider.
+isn't in `approvedCalls`, when a called operation isn't exported to the plugin by its (loaded) provider, when
+`manifest.jobs` and the `@JobHandler()` methods don't match exactly, when a job isn't in `approvedJobs`, when a
+schedule isn't in `approvedSchedules` with the same cron expression (or isn't a valid cron), or when a global
+schedule isn't in `approvedGlobalSchedules`.
 
 **The SPA (plugin UI):**
 
@@ -872,11 +976,12 @@ and (with a UI) `frontend/package.json`; add the module to `api/src/plugins.conf
 ships one); and get the core team's approval in `api/namespace-registry.json`: namespace → `package`,
 `owner`, `approvedPermissions`, `approvedPublicEndpoints` (`"GET /health"` format), `approvedAbilityGrants`
 (same shape as `manifest.abilities`), `approvedUiSlots`, `approvedCalls` (`{ "<provider namespace>": ["<operation>", …] }`,
-for the calls in `manifest.calls`), limit ceilings, `tier` (`first-party` | `verified` |
+for the calls in `manifest.calls`), `approvedJobs` (`["<job>", …]`), `approvedSchedules` (`{ "<schedule>": "<cron>" }`),
+`approvedGlobalSchedules` (`["<schedule>", …]`), limit ceilings, `tier` (`first-party` | `verified` |
 `community`) and `enabled`. Grants decide who sees the plugin's data, so they're a core-team decision.
 
 **Not available (don't invent APIs for these):** configuration or secrets, outbound HTTP integrations,
-scheduled jobs or cron, file storage, collection indexes, durable queues, other plugins' data or code (except
+in-process timers or cron (use jobs, §2.7c), exactly-once jobs, sub-second job timing, file storage, collection indexes, durable queues, other plugins' data or code (except
 their exported operations, §2.7b), module calls without an acting user (from public endpoints, event handlers
 or lifecycle hooks), required dependencies between modules, core collections, user creation or deletion, organization writes, membership changes, email sending, custom
 or system-wide roles (cross-organization staff tooling belongs to the planned admin app), UI slots other than `main-menu` and `profile-menu` (e.g. widgets inside core pages), calling
@@ -898,6 +1003,7 @@ src/
   <feature>/<feature>.service.ts   + .spec.ts
   <feature>/<feature>.controller.ts
   <feature>/<feature>.exports.ts   @ExportedOperation() methods (only if the plugin exports operations) + .spec.ts
+  <feature>/<feature>.jobs.ts      @JobHandler() methods (only if the plugin has jobs) + .spec.ts
   <feature>/dto/*.dto.ts
   listeners/<event>.listener.ts    + .spec.ts
   ui/                              the Vue UI (excluded from the API build)
@@ -925,7 +1031,9 @@ pins, requires the installed tarball (lockfile integrity) to carry an attestatio
 workflow on `main` for the `v<version>` tag of `unifyamerica/<package short name>`
 (`gh attestation verify`), applies the same pin and provenance checks to the SDK (one exact version in both
 `package.json` files, attested by `unifyamerica/demleague-plugin-sdk`'s release workflow), and runs the boot gate (`loadPlugins()` against the registry). Peer dependencies are
-`@unifyamerica/demleague-plugin-sdk ^0.4.0`, `@nestjs/common ^12.0.0`, `class-transformer ^0.5.1`,
+`@unifyamerica/demleague-plugin-sdk >=0.5.0 <1.0.0` (a range up to the next major: for `0.x`, `^0.5.0` would stop at
+`<0.6.0` and the host would refuse the plugin's second SDK copy once DemLeagueOS moves to the next additive
+minor), `@nestjs/common ^12.0.0`, `class-transformer ^0.5.1`,
 `class-validator ^0.15.0`, `reflect-metadata ^0.2.0`. Dev dependencies are the same packages plus
 `@nestjs/core`, `@nestjs/testing`, `jest`, `ts-jest`, `@types/jest`, `@types/node`, `rxjs`, `typescript`.
 Jest uses `rootDir: "src"`, `testRegex: ".*\\.spec\\.ts$"`, a ts-jest transform,
@@ -990,7 +1098,7 @@ import { type PluginManifest, SDK_API_VERSION } from '@unifyamerica/demleague-pl
 export const ACME_NOTES_MANIFEST: PluginManifest = {
   sdkApiVersion: SDK_API_VERSION,
   namespace: 'acme.notes',
-  version: '0.3.0',
+  version: '0.3.1',
   displayName: 'Notes',
   description: 'Private notes for each user in each of their organizations, with a welcome note when they join one',
   permissions: ['users:read', 'data:read', 'data:write'],
@@ -1547,12 +1655,12 @@ unavailable).
 1. **Clarify first.** From the feature spec, find the data model, who can see and change what (owner,
    organization role: `member` or `org_admin`), which endpoints are needed and which (if any) must be public, which
    platform events matter, which other modules' data or actions it needs (module calls, §2.7b) and what it
-   should offer other modules (exports), the UI pages and menu entries (if any), the expected volumes (for
+   should offer other modules (exports), what has to happen later or on a schedule (jobs, §2.7c), the UI pages and menu entries (if any), the expected volumes (for
    limits), and any needs outside the contract (§3). Ask concise questions only when the answer changes the design. Otherwise
    state your assumption and go ahead.
 2. **Design before code.** Present the manifest first, with a one-line justification for each permission,
-   ability grant, UI slot, public endpoint, call to another module, export (its ability and consumers) and
-   limit, plus the collection schemas, an endpoint table (method,
+   ability grant, UI slot, public endpoint, call to another module, export (its ability and consumers), job,
+   schedule (its cron) and limit, plus the collection schemas, an endpoint table (method,
    path, auth, `@RequireAbility`, purpose) and a page table (path, name, ability, menu). Call out every
    **"Requires a new SDK capability"** gap.
 3. **Then generate complete files**: manifest, plugin module, `index.ts`, interfaces, DTOs, services,
@@ -1563,7 +1671,8 @@ unavailable).
 4. **Self-verify** against the checklist below and report the result. If you can run commands, run
    `npm test`, `npm run lint`, `npm run type-check` and `npm run build`, and fix the failures.
 5. **Prepare the submission**: the registry entry request (JSON, with `approvedPermissions`,
-   `approvedPublicEndpoints`, `approvedAbilityGrants`, `approvedUiSlots`, `approvedCalls`, limits), the
+   `approvedPublicEndpoints`, `approvedAbilityGrants`, `approvedUiSlots`, `approvedCalls`, `approvedJobs`,
+   `approvedSchedules`, `approvedGlobalSchedules`, limits), the
    modules it exports operations to (and that each called provider exports to it), the
    `api/src/plugins.config.ts` and (with a UI) `frontend/src/plugins.config.ts` lines, the exact-version pins
    for `api/package.json` and `frontend/package.json`, and a description that justifies permissions,
@@ -1603,6 +1712,11 @@ unavailable).
 - [ ] Exports (if any): each has one `@ExportedOperation()` method on a class provider, the ability of its
       matching endpoint, the narrowest `consumers`, validates its input, returns plain JSON only, and is tested
       with `harness.invokeExport` (happy path, validation, ability denial)
+- [ ] Jobs (if any): each declared in `manifest.jobs` with exactly one `@JobHandler()` on a class provider,
+      idempotent (checks state before changing it), scheduled with a dedup `key` where it must not be doubled,
+      requested in `approvedJobs`; schedules requested in `approvedSchedules` with their cron (global ones in
+      `approvedGlobalSchedules`); no timers or cron libraries; tested with `harness.jobs` (incl. a second run and a
+      failure)
 - [ ] The tests cover the manifest, happy paths, owner and organization isolation (`tenant`, `setTenant`), a
       permission denial, the listeners and emitted events
 - [ ] The SDK, `@nestjs/common`, `class-validator`, `class-transformer` and `reflect-metadata` are peer
@@ -1633,6 +1747,7 @@ unavailable).
 - **Platform events to react to / events to emit:**
 - **Other modules it uses** (which operations, and what if they're unavailable) **/ operations it offers other
   modules** (who may call them, with which ability):
+- **Deferred or recurring work** (what runs later or on a schedule, how often, per organization or global):
 - **Roles and access rules** (owner-only, org members, org admins):
 - **UI** (pages, who may open each, main-menu / profile-menu entries; or "none"):
 - **Expected volumes** (users, records per user, record size, requests per minute):
