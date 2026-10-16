@@ -19,7 +19,7 @@ the SPA when it bundles the UI. Code that violates it won't load, or will fail i
 requirement can't be met within the contract, say so plainly and propose the closest conforming design. Never
 work around the contract.
 
-**Contract version:** `@unifyamerica/demleague-plugin-sdk` 0.3.x, `SDK_API_VERSION = 1`, NestJS `^12`, `class-validator`
+**Contract version:** `@unifyamerica/demleague-plugin-sdk` 0.4.x, `SDK_API_VERSION = 1`, NestJS `^12`, `class-validator`
 `^0.15`, `class-transformer` `^0.5.1`, Node 24, TypeScript ~6.0, Jest + ts-jest (API). UI: Vue `^3.5`,
 Pinia `^4` (provided through the SDK), PrimeVue `^4.5`, Tailwind utility classes, Vite `^8` (library mode),
 vue-tsc `^3.3`, Vitest `^5` + `@vue/test-utils` + jsdom.
@@ -84,7 +84,9 @@ Check every one of these before you present code.
     in templates, `<component is>`, `h()` or `document.createElement()`, and never write raw HTML
     (`v-html`, `innerHTML`, `outerHTML`, `srcdoc`, `insertAdjacentHTML`, `document.write`). Lint and the
     install PR's check of `dist/ui` reject it, and the SPA's CSP (`frame-src 'none'; object-src 'none'`)
-    blocks it at runtime. Link out with a normal `<a href>` instead.
+    blocks it at runtime. Link out with a normal `<a href>` instead. To show HTML (for example written by an
+    org admin), use the SDK's sanitizing **`v-safe-html`** directive (`vSafeHtml`, §2.11), never `v-html`.
+    For dates and time zones use the **luxon** the SDK passes through (§2.9a), never a date package.
 17. **Menu entries need slots.** `mainMenu` needs `'main-menu'`, `profileMenu` needs `'profile-menu'` in
     `manifest.ui.slots`, and each slot must be in the registry's `approvedUiSlots`. Pages need no slot. An
     entry is a link (`to`) or a group of links (`children`, one level), never both.
@@ -108,7 +110,7 @@ This section is the complete public API. Don't use anything that isn't listed he
 
 | Entry | Format | Used by | Contents |
 | --- | --- | --- | --- |
-| `@unifyamerica/demleague-plugin-sdk` | CJS | API code | everything in §2.1–2.9, including §2.7a–2.7b (and all of `./manifest`) |
+| `@unifyamerica/demleague-plugin-sdk` | CJS | API code | everything in §2.1–2.9a, including §2.7a–2.7b (and all of `./manifest`) |
 | `@unifyamerica/demleague-plugin-sdk/manifest` | CJS + ESM | `src/manifest.ts` | NestJS-free manifest contract: `SDK_API_VERSION`, permissions, manifest types, abilities/roles, UI slots, events, lifecycle types, the module call contract (§2.7b: `OPERATION_NAME_PATTERN`, `ANY_CONSUMER`, `MAX_CALL_PAYLOAD_BYTES`, `MAX_CALL_DEPTH`, export/call types, `isPlainJson`, `copyCallPayload`), `validateManifest`, `validateAbilityGrants`, `normalizeEndpointPath`, `NAMESPACE_PATTERN`, `RESERVED_VENDORS` |
 | `@unifyamerica/demleague-plugin-sdk/testing` | CJS | API specs | §2.10 |
 | `@unifyamerica/demleague-plugin-sdk/vue` | ESM (browser) | UI code | §2.11 (re-exports all of `./manifest` and the `PluginOrganization` type) |
@@ -590,6 +592,22 @@ The host renders them as JSON:API errors (`{ errors: [{ status, code, title, det
 details of 5xx errors. For plugin-specific errors, throw `@nestjs/common` exceptions (`NotFoundException`,
 `BadRequestException`, `ConflictException`, ...).
 
+### 2.9a Dates and time zones (luxon)
+
+```ts
+// From the root entry (API) and `/vue` (UI); one copy, bundled by the SPA and kept external by plugins
+export { DateTime, Duration, Interval, Info, Zone, IANAZone, FixedOffsetZone } from 'luxon';
+export type {
+  DateObjectUnits, DateTimeFormatOptions, DateTimeJSOptions, DateTimeOptions, DurationLike,
+  DurationLikeObject, DurationUnit, ToISOTimeOptions, WeekdayNumbers,
+} from 'luxon';
+```
+
+- `Settings` is **not** exported: it's global, so a plugin changing its default zone, locale or clock would
+  change every other plugin's dates and the SPA's. Pass `{ zone }` and `{ locale }` per call.
+- Store `Date` values in documents and ISO strings in JSON; convert with
+  `DateTime.fromISO(iso, { zone }).toUTC().toJSDate()` and `DateTime.fromJSDate(date).setZone(zone)`.
+
 ### 2.10 Testing (`@unifyamerica/demleague-plugin-sdk/testing`)
 
 ```ts
@@ -722,6 +740,13 @@ export interface PluginToast {
   error(detailOrError?: unknown): void;   // a message or a caught error (e.g. from useApi())
 }
 export type PluginMessageParams = Record<string, unknown>;   // t('greeting', { name }) with 'Hello {name}'
+// HTML (for example written by an org admin), sanitized with DOMPurify before it's rendered: no scripts, event
+// handler attributes, javascript: URLs, frames, object/embed, forms and their controls, or style elements and
+// attributes; links with a target get rel="noopener noreferrer". Formatting, lists, tables, links, images stay.
+export function sanitizeHtml(html: string | null | undefined): string;   // '' for null/empty
+export const vSafeHtml: ObjectDirective<HTMLElement, string | null | undefined>;
+// usage: import { vSafeHtml } in <script setup>, then <div v-safe-html="html" /> (re-sanitized on change)
+// + luxon (§2.9a)
 // Also exported: type PluginHost (the SPA's implementation contract; plugins never use it directly)
 ```
 
@@ -736,6 +761,9 @@ export type PluginMessageParams = Record<string, unknown>;   // t('greeting', { 
 - Composables need the SPA's host: call them at runtime (in `setup()`, a store's setup function, a handler),
   never at module top level. Outside the SPA they throw unless a test host is installed (§2.12).
 - Create one instance in `src/ui/plugin.ts` and destructure the composables from it.
+- **HTML** someone wrote is shown with `v-safe-html` only (never `v-html`, which lint and the install check
+  reject). The SPA's Tailwind reset strips heading and list styles, so style the container with arbitrary
+  variants (`[&_h1]:text-2xl [&_ul]:list-disc …`).
 
 ### 2.12 UI testing (`@unifyamerica/demleague-plugin-sdk/vue/testing`)
 
@@ -1555,7 +1583,8 @@ unavailable).
 - [ ] Every `@RequireAbility()` subject is `User`, `Organization` or declared in `manifest.abilities`, and
       every endpoint the UI calls carries the right one
 - [ ] Only allowed imports and injectables. No `process.env`, `console`, `require`, `eval` or `Function`.
-- [ ] No iframes, `frame`, `object` or `embed` in the UI, and no raw HTML (`v-html`, `innerHTML`, …)
+- [ ] No iframes, `frame`, `object` or `embed` in the UI, and no raw HTML (`v-html`, `innerHTML`, …): HTML
+      only through `v-safe-html`; dates through the SDK's luxon
 - [ ] No `imports`, `@Global()` or `APP_*` providers
 - [ ] All body and query inputs use bounded `class-validator` DTOs
 - [ ] Per-user reads and writes filter on the owner, others' records give 404, and no code stores or relies
