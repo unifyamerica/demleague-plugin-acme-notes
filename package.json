@@ -1,6 +1,6 @@
 {
   "name": "@unifyamerica/demleague-plugin-acme-notes",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Example DemLeagueOS plugin (namespace acme.notes): per-user notes in each organization, with an API part and a Vue UI. Doubles as the template for third-party plugins.",
   "repository": {
     "type": "git",
@@ -26,7 +26,7 @@
   },
   "peerDependencies": {
     "@nestjs/common": "^12.0.0",
-    "@unifyamerica/demleague-plugin-sdk": ">=0.4.0 <1.0.0",
+    "@unifyamerica/demleague-plugin-sdk": ">=0.6.0 <1.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.0",
     "primevue": "^4.5.0",
@@ -40,7 +40,7 @@
     "@nestjs/testing": "^12.1.2",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.19.0",
-    "@unifyamerica/demleague-plugin-sdk": "^0.4.0",
+    "@unifyamerica/demleague-plugin-sdk": "^0.6.0",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vue/test-utils": "^2.5.1",
     "@vue/tsconfig": "^0.9.1",
