@@ -1,16 +1,12 @@
-import {
-  type PluginManifest,
-  SDK_API_VERSION,
-} from '@unifyamerica/demleague-plugin-sdk/manifest';
+import { type PluginManifest } from '@unifyamerica/demleague-plugin-sdk/manifest';
 
 // ℹ️ Everything this plugin needs from the platform. The core team approves these permissions, ability grants
 // and UI slots in the API's namespace registry; any change to this file shows up in the version-bump PR and
 // is reviewed there. Imported by both the server code and the UI (`src/ui`), hence the NestJS-free
 // `@unifyamerica/demleague-plugin-sdk/manifest`.
 export const ACME_NOTES_MANIFEST: PluginManifest = {
-  sdkApiVersion: SDK_API_VERSION,
   namespace: 'acme.notes',
-  version: '0.3.1',
+  version: '0.3.2',
   displayName: 'Notes',
   description:
     'Private notes for each user in each of their organizations, with a welcome note when they join one',
