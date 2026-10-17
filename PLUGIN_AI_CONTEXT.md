@@ -19,7 +19,7 @@ the SPA when it bundles the UI. Code that violates it won't load, or will fail i
 requirement can't be met within the contract, say so plainly and propose the closest conforming design. Never
 work around the contract.
 
-**Contract version:** `@unifyamerica/demleague-plugin-sdk` 0.5.x, `SDK_API_VERSION = 1`, NestJS `^12`, `class-validator`
+**Contract version:** `@unifyamerica/demleague-plugin-sdk` 0.6.x, NestJS `^12`, `class-validator`
 `^0.15`, `class-transformer` `^0.5.1`, Node 24, TypeScript ~6.0, Jest + ts-jest (API). UI: Vue `^3.5`,
 Pinia `^4` (provided through the SDK), PrimeVue `^4.5`, Tailwind utility classes, Vite `^8` (library mode),
 vue-tsc `^3.3`, Vitest `^5` + `@vue/test-utils` + jsdom.
@@ -117,7 +117,7 @@ This section is the complete public API. Don't use anything that isn't listed he
 | Entry | Format | Used by | Contents |
 | --- | --- | --- | --- |
 | `@unifyamerica/demleague-plugin-sdk` | CJS | API code | everything in §2.1–2.9a, including §2.7a–2.7c (and all of `./manifest`) |
-| `@unifyamerica/demleague-plugin-sdk/manifest` | CJS + ESM | `src/manifest.ts` | NestJS-free manifest contract: `SDK_API_VERSION`, permissions, manifest types, abilities/roles, UI slots, events, lifecycle types, the module call contract (§2.7b: `OPERATION_NAME_PATTERN`, `ANY_CONSUMER`, `MAX_CALL_PAYLOAD_BYTES`, `MAX_CALL_DEPTH`, export/call types, `isPlainJson`, `copyCallPayload`), the jobs contract (§2.7c: job/schedule types, constants and helpers), `validateManifest`, `validateAbilityGrants`, `normalizeEndpointPath`, `NAMESPACE_PATTERN`, `RESERVED_VENDORS` |
+| `@unifyamerica/demleague-plugin-sdk/manifest` | CJS + ESM | `src/manifest.ts` | NestJS-free manifest contract: `SDK_API_VERSION` (deprecated), permissions, manifest types, abilities/roles, UI slots, events, lifecycle types, the module call contract (§2.7b: `OPERATION_NAME_PATTERN`, `ANY_CONSUMER`, `MAX_CALL_PAYLOAD_BYTES`, `MAX_CALL_DEPTH`, export/call types, `isPlainJson`, `copyCallPayload`), the jobs contract (§2.7c: job/schedule types, constants and helpers), `validateManifest`, `validateAbilityGrants`, `normalizeEndpointPath`, `NAMESPACE_PATTERN`, `RESERVED_VENDORS` |
 | `@unifyamerica/demleague-plugin-sdk/testing` | CJS | API specs | §2.10 |
 | `@unifyamerica/demleague-plugin-sdk/vue` | ESM (browser) | UI code | §2.11 (re-exports all of `./manifest` and the `PluginOrganization` type) |
 | `@unifyamerica/demleague-plugin-sdk/vue/testing` | ESM | UI specs | §2.12 |
@@ -125,7 +125,7 @@ This section is the complete public API. Don't use anything that isn't listed he
 ### 2.1 Constants
 
 ```ts
-export const SDK_API_VERSION = 1;
+export const SDK_API_VERSION = 1;                         // @deprecated: ignored, removed in 1.0
 export const SDK_IDENTITY: unique symbol;                 // host-internal (detects duplicate SDK copies)
 export const PLUGIN_DEFINITION_METADATA = 'demleague:plugin:definition';
 export const PLUGIN_REQUIRED_ABILITY_METADATA = 'demleague:plugin:required-ability';
@@ -134,7 +134,8 @@ export const PLUGIN_JOB_HANDLER_METADATA = 'demleague:plugin:job-handler';
 export const PLUGIN_ACTOR_REQUEST_KEY = 'pluginActor';
 ```
 
-Plugin code normally uses only `SDK_API_VERSION`.
+Plugin code uses none of these. Never write `SDK_API_VERSION` or `sdkApiVersion`: since 0.6.0 they're ignored, and
+1.0 removes them.
 
 ### 2.2 Permissions
 
@@ -188,7 +189,7 @@ export const DEFAULT_RESOURCE_LIMITS: Required<PluginResourceLimits> = {
 };
 
 export interface PluginManifest {
-  sdkApiVersion: number;                 // SDK_API_VERSION
+  sdkApiVersion?: number;                // @deprecated: ignored, removed in 1.0; leave it out
   namespace: string;                     // '<vendor>.<module>'
   version: string;                       // semver, equals package.json
   displayName: string;
@@ -252,7 +253,6 @@ export interface PluginUiDeclaration { slots?: PluginUiSlot[] }
 **Manifest validation** (`validateManifest(manifest): string[]` returns problems, `[]` when valid; it runs
 in `@PluginModule()` and again at startup):
 
-- `sdkApiVersion === SDK_API_VERSION`
 - `namespace` matches `NAMESPACE_PATTERN = /^[a-z][a-z0-9-]{1,30}\.[a-z][a-z0-9-]{1,40}$/`, and the vendor
   is not in `RESERVED_VENDORS = ['core','plugins','auth','api','admin']`
 - `version` is semver. `displayName` is not blank.
@@ -1031,8 +1031,8 @@ pins, requires the SDK peer range to include the SDK version DemLeagueOS pins (a
 workflow on `main` for the `v<version>` tag of `unifyamerica/<package short name>`
 (`gh attestation verify`), applies the same pin and provenance checks to the SDK (one exact version in both
 `package.json` files, attested by `unifyamerica/demleague-plugin-sdk`'s release workflow), and runs the boot gate (`loadPlugins()` against the registry). Peer dependencies are
-`@unifyamerica/demleague-plugin-sdk >=0.5.0 <1.0.0` (a range up to the next major: for `0.x`, `^0.5.0` would stop at
-`<0.6.0` and the host would refuse the plugin's second SDK copy once DemLeagueOS moves to the next additive
+`@unifyamerica/demleague-plugin-sdk >=0.6.0 <1.0.0` (a range up to the next major: for `0.x`, `^0.6.0` would stop at
+`<0.7.0` and the host would refuse the plugin's second SDK copy once DemLeagueOS moves to the next additive
 minor), `@nestjs/common ^12.0.0`, `class-transformer ^0.5.1`,
 `class-validator ^0.15.0`, `reflect-metadata ^0.2.0`. Dev dependencies are the same packages plus
 `@nestjs/core`, `@nestjs/testing`, `jest`, `ts-jest`, `@types/jest`, `@types/node`, `rxjs`, `typescript`.
@@ -1093,10 +1093,9 @@ iframes (rule 16): `vue/no-restricted-html-elements` for `iframe`, `frame`, `fra
 ### 5.1 Manifest
 
 ```ts
-import { type PluginManifest, SDK_API_VERSION } from '@unifyamerica/demleague-plugin-sdk/manifest';  // NestJS-free: the UI imports this file too
+import { type PluginManifest } from '@unifyamerica/demleague-plugin-sdk/manifest';  // NestJS-free: the UI imports this file too
 
 export const ACME_NOTES_MANIFEST: PluginManifest = {
-  sdkApiVersion: SDK_API_VERSION,
   namespace: 'acme.notes',
   version: '0.3.1',
   displayName: 'Notes',
