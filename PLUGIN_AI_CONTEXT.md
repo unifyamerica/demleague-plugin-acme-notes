@@ -1027,7 +1027,7 @@ repo. The scripts are `build` (clears `dist/`, then `tsc -p tsconfig.build.json`
 `type-check`. On the install PR, the DemLeagueOS "Plugin contract" CI job re-checks the shipped `dist/`
 against the lint import allowlists (and no `process.env`, `eval`, `Function` constructor, nor iframes or
 raw HTML in `dist/ui`), requires exact
-pins, requires the installed tarball (lockfile integrity) to carry an attestation from the org's release
+pins, requires the SDK peer range to include the SDK version DemLeagueOS pins (and no nested SDK copy), requires the installed tarball (lockfile integrity) to carry an attestation from the org's release
 workflow on `main` for the `v<version>` tag of `unifyamerica/<package short name>`
 (`gh attestation verify`), applies the same pin and provenance checks to the SDK (one exact version in both
 `package.json` files, attested by `unifyamerica/demleague-plugin-sdk`'s release workflow), and runs the boot gate (`loadPlugins()` against the registry). Peer dependencies are
